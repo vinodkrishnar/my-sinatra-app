@@ -1,0 +1,165 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  Environment:
+    Description: Development/QA/Staging/Production/Core
+    Type: String
+    Default: Development
+  BusinessUnit:
+    Description: Technology Business Unit
+    Type: String
+    Default: DevOps
+  Team:
+    Description: Name of the Team
+    Type: String
+    Default: DevOps
+  VpcId:
+    Type: String
+    Description: The VPC ID
+  EC2SubnetId:
+    Type: String
+    Description: The Subnet ID
+  ALBSubnets:
+    Description: Choose which subnets the Applicaion Load Balancer should be deployed to
+    Type: List<AWS::EC2::Subnet::Id>
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the ECS instances
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: t2.micro
+    ConstraintDescription: Please choose a valid instance type.
+  SSHcidr:
+    Description: CIDR range to be used by EC2 Security Group for ssh
+    Type: String  
+  Ami:
+    Description: AMI ID
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux/recommended/image_id
+  SharedBucket:
+    Description: The name of the bucket that holds the application
+    Type: String    
+
+Resources:
+  
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupName: !Sub "${AWS::StackName}-ALBSG"
+      GroupDescription: "ALB SecurityGroup"
+      SecurityGroupIngress: 
+       - IpProtocol: "tcp"
+         FromPort: "80"
+         ToPort: "80"
+         CidrIp: "0.0.0.0/0"
+      VpcId: !Ref VpcId    
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-ALBSG" 
+  
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupName: !Sub "${AWS::StackName}-EC2SG"
+      GroupDescription: "EC2 SecurityGroup"
+      SecurityGroupIngress: 
+        - SourceSecurityGroupId: !Ref ALBSecurityGroup
+          IpProtocol: "tcp"
+          FromPort: "80"
+          ToPort: "80"
+        - IpProtocol: "tcp"
+          FromPort: "22"
+          ToPort: "22"
+          CidrIp: !Ref SSHcidr
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-EC2SG" 
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    DependsOn:
+    - Ec2Role
+    Properties:
+      Path: "/"
+      Roles: [!Ref Ec2Role]
+  Ec2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+      - PolicyName: s3access
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+            - s3:*
+            Resource: "*"      
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      SubnetId: !Ref EC2SubnetId
+      SecurityGroupIds:
+        - !GetAtt "EC2SecurityGroup.GroupId"
+      KeyName: !Ref KeyName
+      ImageId: !Ref Ami
+      Tags:
+        - Key: Name
+          Value: !Ref BusinessUnit
+        - Key: Team
+          Value: !Ref Team
+        - Key: Environment
+          Value: !Ref Environment
+      UserData:
+        Fn::Base64:
+          Fn::Join:
+          - ""
+          - - "#!/bin/bash\n"
+            - "yum install gem curl wget zip unzip -y\n"
+            -  "curl https://s3.amazonaws.com/aws-cli/awscli-bundle.zip -o awscli-bundle.zip && unzip awscli-bundle.zip && sudo ./awscli-bundle/install -i /usr/local/aws -b /usr/local/bin/aws\n"
+            -  "gem install bundler -v '~>1'\n"
+            -  !Sub "/usr/local/bin/aws s3 cp s3://${SharedBucket}/demo/app.zip /opt/ && unzip /opt/app.zip -d /opt\n"
+            -  "cd /opt/app && /usr/local/bin/bundle install && /usr/local/bin/rackup -p 80 --host 0.0.0.0 \n"
+            - "rm -f /opt/app.zip\n"    
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+        Name: !Sub "${AWS::StackName}-ALB" 
+        Scheme: "internal"
+        Subnets: !Ref ALBSubnets
+        SecurityGroups:  
+          - !GetAtt "ALBSecurityGroup.GroupId"         
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${AWS::StackName}-TG
+      TargetType: instance
+      Targets:
+        - Id: !Ref EC2Instance
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref VpcId
+  HTTPListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: '80'
+      Protocol: HTTP
+Outputs:
+  SinatraALBName:
+    Description: The DNSName of the load balancer
+    Value: !GetAtt LoadBalancer.DNSName      

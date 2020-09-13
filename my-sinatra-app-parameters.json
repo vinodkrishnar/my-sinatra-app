@@ -1,0 +1,37 @@
+[
+ 
+  {
+    "ParameterKey": "Environment",
+    "ParameterValue": "Development"
+  },
+  {
+    "ParameterKey": "BusinessUnit",
+    "ParameterValue": "CloudOps"
+  },
+  {
+    "ParameterKey": "ALBSubnets",
+    "ParameterValue": "<subnet-xxxxxxx,subnet-yyyyyyy,subnet-zzzzzz>"
+  },
+  {
+    "ParameterKey": "EC2SubnetId",
+    "ParameterValue": "<subnet-ttttttt>"
+  },
+
+  {
+    "ParameterKey": "VpcId",
+    "ParameterValue": "<vpc-xxxxxx<"
+  },
+  {
+    "ParameterKey": "KeyName",
+    "ParameterValue": "<your key pair>"
+  },
+ 
+  {
+    "ParameterKey":"SharedBucket",
+    "ParameterValue": "<a bucket that holds the app.zip>"
+  },
+  {
+    "ParameterKey":"SSHcidr",
+    "ParameterValue": "<cidr range of your network>"
+  }
+]
